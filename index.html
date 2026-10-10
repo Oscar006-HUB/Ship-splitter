@@ -38,12 +38,23 @@ input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid 
 .kv span{color:var(--mute)}.kv b{text-align:right;font-weight:500}.kv .big{color:var(--ink);font-weight:700}
 .warn{background:var(--tape);color:var(--tapeInk);padding:10px 12px;border-radius:8px;font-size:.88rem;margin-bottom:12px}
 .note{font-size:.85rem;color:var(--mute)}
+[hidden]{display:none!important}
 </style>
 </head>
 <body>
 <main>
 <h1>Shipping cost splitter</h1>
 <p class="sub">Enter your supplier's order and the total shipping bill. It divides the shipping across products and gives each one a landed cost.</p>
+
+<div class="card">
+  <div class="grid">
+    <label>Supplier prices are in<select id="pcur"><option>GHS</option><option>USD</option><option>EUR</option><option>GBP</option><option>CNY</option><option>AED</option><option>INR</option><option>TRY</option></select></label>
+    <label id="prateBox">1 <span id="pcn"></span> = how many GHS?<input id="prate" type="number" min="0" step="any" inputmode="decimal"></label>
+    <label>Shipping bill is in<select id="scur"><option>GHS</option><option>USD</option><option>EUR</option><option>GBP</option><option>CNY</option><option>AED</option><option>INR</option><option>TRY</option></select></label>
+    <label id="srateBox">1 <span id="scn"></span> = how many GHS?<input id="srate" type="number" min="0" step="any" inputmode="decimal"></label>
+  </div>
+  <p class="note">Everything is converted to cedis before the split, so each product carries its fair share. Enter the rate you paid or today's bank rate.</p>
+</div>
 
 <div class="card">
   <div class="grid">
@@ -81,7 +92,7 @@ const KEY="ship-split-v1";
 const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const num=v=>{const x=parseFloat(v);return isFinite(x)&&x>=0?x:0};
-const money=n=>n.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+const money=n=>"GH₵ "+n.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
 const sample=()=>({ship:500,other:0,method:"value",blend:50,margin:25,items:[
  {name:"Wireless earbuds",qty:100,price:12,weight:0.1},
  {name:"Desk lamp",qty:40,price:18,weight:1.2},
@@ -89,6 +100,7 @@ const sample=()=>({ship:500,other:0,method:"value",blend:50,margin:25,items:[
 let S;
 try{S=JSON.parse(localStorage.getItem(KEY)||"null")}catch(e){S=null}
 if(!S||!Array.isArray(S.items))S=sample();
+S=Object.assign({pcur:"GHS",prate:0,scur:"GHS",srate:0},S);
 const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
 
 function drawItems(){
@@ -107,10 +119,12 @@ function drawItems(){
 }
 
 function calc(){
-  const ship=num(S.ship),other=num(S.other),extra=ship+other;
+  const pr=S.pcur==="GHS"?1:num(S.prate),sr=S.scur==="GHS"?1:num(S.srate);
+  const missing=!pr||!sr;
+  const extra=(num(S.ship)+num(S.other))*sr;
   const rows=S.items.map(it=>{
-    const q=num(it.qty),p=num(it.price),w=num(it.weight);
-    return {name:it.name||"Unnamed",q,p,value:q*p,wt:q*w};
+    const q=num(it.qty),p0=num(it.price),p=p0*pr,w=num(it.weight);
+    return {name:it.name||"Unnamed",q,p0,p,value:q*p,wt:q*w};
   });
   const tV=rows.reduce((a,r)=>a+r.value,0),tW=rows.reduce((a,r)=>a+r.wt,0),tQ=rows.reduce((a,r)=>a+r.q,0);
   let method=S.method,warn="";
@@ -127,11 +141,12 @@ function calc(){
     const m=Math.min(num(S.margin),99)/100;
     r.sell=r.landed/(1-m);
   });
-  return {rows,tV,extra,warn};
+  return {rows,tV,extra,warn,missing};
 }
 
 function draw(){
-  const {rows,tV,extra,warn}=calc();
+  const {rows,tV,extra,warn,missing}=calc();
+  if(missing){$("warn").innerHTML='<div class="warn">Enter the exchange rate to cedis (GHS) above to see results.</div>';$("summary").innerHTML="";$("results").innerHTML="";return}
   $("warn").innerHTML=warn?`<div class="warn">${warn}</div>`:"";
   const totalLanded=tV+extra;
   $("summary").innerHTML=rows.length?`<div class="card sum">
@@ -144,7 +159,7 @@ function draw(){
     <div class="kv">
       <span>Shipping share (${r.q} units)</span><b>${money(r.cost)}</b>
       <span>Shipping per unit</span><b>${money(r.perUnitShip)}</b>
-      <span>Supplier price per unit</span><b>${money(r.p)}</b>
+      <span>Supplier price per unit</span><b>${money(r.p)}${S.pcur!=="GHS"?` (${r.p0} ${S.pcur})`:""}</b>
       <span class="big">Landed cost per unit</span><b class="big">${money(r.landed)}</b>
       <span>Selling price for ${num(S.margin)}% margin</span><b>${money(r.sell)}</b>
     </div></div>`).join("");
@@ -173,10 +188,18 @@ $("copy").onclick=async()=>{
   catch(e){$("msg").textContent="Copy is blocked here. Use your browser's share or open the link in a full browser tab."}
 };
 function sync(){
+  $("pcur").value=S.pcur;$("scur").value=S.scur;$("prate").value=S.prate||"";$("srate").value=S.srate||"";rateUI();
   $("ship").value=S.ship;$("other").value=S.other;$("method").value=S.method;
   $("blend").value=S.blend;$("blendVal").textContent=S.blend;$("margin").value=S.margin;
   $("blendBox").hidden=S.method!=="blend";
 }
+function rateUI(){$("pcn").textContent=S.pcur;$("scn").textContent=S.scur;$("prateBox").hidden=S.pcur==="GHS";$("srateBox").hidden=S.scur==="GHS"}
+["pcur","scur"].forEach(id=>$(id).addEventListener("change",()=>{S[id]=$(id).value;rateUI();save();draw()}));
+["prate","srate"].forEach(id=>$(id).addEventListener("input",()=>{
+  S[id]=num($(id).value);
+  if(id==="prate"&&S.scur===S.pcur){S.srate=S.prate;$("srate").value=S.srate||""}
+  save();draw();
+}));
 sync();drawItems();draw();
 </script>
 </body>
