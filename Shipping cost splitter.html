@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Shipping cost splitter</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;500;700&display=swap">
+<style>
+:root{--bg:#eef2f5;--card:#fff;--ink:#14252f;--mute:#5d707c;--line:#d5dee4;--acc:#0e7c86;--tape:#f2c230;--tapeInk:#3a2f00;--bad:#b3261e;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#101a20;--card:#18262e;--ink:#e6eef2;--mute:#92a6b2;--line:#2b3d47;--acc:#3cc0cc;--tape:#e0b22a;--tapeInk:#2a2100;--bad:#ff8a80}}
+:root[data-theme="dark"]{--bg:#101a20;--card:#18262e;--ink:#e6eef2;--mute:#92a6b2;--line:#2b3d47;--acc:#3cc0cc;--tape:#e0b22a;--tapeInk:#2a2100;--bad:#ff8a80}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 "Work Sans",system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:640px;margin:0 auto;padding:16px 16px 48px}
+h1{font-size:1.5rem;margin:8px 0 4px;font-weight:700;letter-spacing:-.01em}
+h2{font-size:1.05rem;margin:18px 0 8px}
+.sub{color:var(--mute);margin:0 0 14px;font-size:.92rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+label{display:block;font-size:.82rem;color:var(--mute)}
+input,select{width:100%;margin-top:4px;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}
+input[type=range]{padding:0;accent-color:var(--acc)}
+input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+.btn{border:1px solid var(--line);background:var(--card);color:var(--ink);padding:10px 14px;border-radius:8px;font:inherit;cursor:pointer}
+.btn.p{background:var(--acc);color:#fff;border-color:var(--acc)}
+.btn.d{color:var(--bad);padding:6px 10px;font-size:.85rem}
+.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+.sum{display:flex;justify-content:space-between;gap:8px;border-left:4px solid var(--tape);padding-left:12px}
+.sum b{font-size:1.3rem}.sum span{color:var(--mute);font-size:.82rem;display:block}
+.res .h{display:flex;justify-content:space-between;gap:8px;font-weight:700}
+.res .bar{height:6px;background:var(--line);border-radius:3px;margin:8px 0}
+.res .bar i{display:block;height:100%;background:var(--acc);border-radius:3px}
+.kv{display:grid;grid-template-columns:1fr auto;gap:2px 10px;font-size:.9rem}
+.kv span{color:var(--mute)}.kv b{text-align:right;font-weight:500}.kv .big{color:var(--ink);font-weight:700}
+.warn{background:var(--tape);color:var(--tapeInk);padding:10px 12px;border-radius:8px;font-size:.88rem;margin-bottom:12px}
+.note{font-size:.85rem;color:var(--mute)}
+</style>
+</head>
+<body>
+<main>
+<h1>Shipping cost splitter</h1>
+<p class="sub">Enter your supplier's order and the total shipping bill. It divides the shipping across products and gives each one a landed cost.</p>
+
+<div class="card">
+  <div class="grid">
+    <label>Total shipping bill<input id="ship" type="number" min="0" step="any" inputmode="decimal" value="500"></label>
+    <label>Other costs (duty, handling)<input id="other" type="number" min="0" step="any" inputmode="decimal" value="0"></label>
+  </div>
+  <label style="margin-top:10px">Split shipping by
+    <select id="method">
+      <option value="value">Product value (pricier items carry more)</option>
+      <option value="weight">Weight (heavier items carry more)</option>
+      <option value="qty">Quantity (every unit pays the same)</option>
+      <option value="blend">Blend of weight and value</option>
+    </select>
+  </label>
+  <div id="blendBox" hidden style="margin-top:10px">
+    <label>Weight share: <b id="blendVal">50</b>% weight, rest value
+      <input id="blend" type="range" min="0" max="100" step="5" value="50"></label>
+  </div>
+  <label style="margin-top:10px">Your profit margin on selling price (%)<input id="margin" type="number" min="0" max="99" step="any" inputmode="decimal" value="25"></label>
+</div>
+
+<div class="top"><h2 style="margin:0">Products</h2><button class="btn p" id="add">Add product</button></div>
+<div id="items"></div>
+
+<div id="warn"></div>
+<h2>Results</h2>
+<div id="summary"></div>
+<div id="results"></div>
+<div class="row"><button class="btn" id="copy">Copy as table</button><button class="btn" id="clear">Clear all</button></div>
+<p class="note" id="msg"></p>
+</main>
+
+<script>
+const KEY="ship-split-v1";
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const num=v=>{const x=parseFloat(v);return isFinite(x)&&x>=0?x:0};
+const money=n=>n.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+const sample=()=>({ship:500,other:0,method:"value",blend:50,margin:25,items:[
+ {name:"Wireless earbuds",qty:100,price:12,weight:0.1},
+ {name:"Desk lamp",qty:40,price:18,weight:1.2},
+ {name:"Phone cases",qty:300,price:2,weight:0.05}]});
+let S;
+try{S=JSON.parse(localStorage.getItem(KEY)||"null")}catch(e){S=null}
+if(!S||!Array.isArray(S.items))S=sample();
+const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
+
+function drawItems(){
+  $("items").innerHTML=S.items.map((it,i)=>`
+  <div class="card" data-i="${i}">
+    <div style="display:flex;gap:8px;align-items:end">
+      <label style="flex:1">Product name<input data-f="name" value="${esc(it.name)}"></label>
+      <button class="btn d" data-del="${i}" aria-label="Remove product">Remove</button>
+    </div>
+    <div class="grid3" style="margin-top:8px">
+      <label>Quantity<input data-f="qty" type="number" min="0" step="any" inputmode="decimal" value="${it.qty}"></label>
+      <label>Unit price<input data-f="price" type="number" min="0" step="any" inputmode="decimal" value="${it.price}"></label>
+      <label>Unit weight (kg)<input data-f="weight" type="number" min="0" step="any" inputmode="decimal" value="${it.weight}"></label>
+    </div>
+  </div>`).join("")||`<div class="card note">No products yet. Tap Add product.</div>`;
+}
+
+function calc(){
+  const ship=num(S.ship),other=num(S.other),extra=ship+other;
+  const rows=S.items.map(it=>{
+    const q=num(it.qty),p=num(it.price),w=num(it.weight);
+    return {name:it.name||"Unnamed",q,p,value:q*p,wt:q*w};
+  });
+  const tV=rows.reduce((a,r)=>a+r.value,0),tW=rows.reduce((a,r)=>a+r.wt,0),tQ=rows.reduce((a,r)=>a+r.q,0);
+  let method=S.method,warn="";
+  if(method==="weight"&&tW===0){warn="Add unit weights to split by weight. Using value for now.";method="value"}
+  if(method==="blend"&&tW===0){warn="Add unit weights to blend by weight. Using value for now.";method="value"}
+  if(method==="value"&&tV===0){warn="Add unit prices to split by value. Using quantity for now.";method="qty"}
+  const a=num(S.blend)/100;
+  rows.forEach(r=>{
+    const vs=tV?r.value/tV:0, ws=tW?r.wt/tW:0, qs=tQ?r.q/tQ:0;
+    r.share=method==="value"?vs:method==="weight"?ws:method==="qty"?qs:a*ws+(1-a)*vs;
+    r.cost=r.share*extra;
+    r.perUnitShip=r.q?r.cost/r.q:0;
+    r.landed=r.p+r.perUnitShip;
+    const m=Math.min(num(S.margin),99)/100;
+    r.sell=r.landed/(1-m);
+  });
+  return {rows,tV,extra,warn};
+}
+
+function draw(){
+  const {rows,tV,extra,warn}=calc();
+  $("warn").innerHTML=warn?`<div class="warn">${warn}</div>`:"";
+  const totalLanded=tV+extra;
+  $("summary").innerHTML=rows.length?`<div class="card sum">
+    <div><span>Goods</span><b>${money(tV)}</b></div>
+    <div><span>Shipping + other</span><b>${money(extra)}</b></div>
+    <div><span>Total landed</span><b>${money(totalLanded)}</b></div></div>`:"";
+  $("results").innerHTML=rows.map(r=>`<div class="card res">
+    <div class="h"><span>${esc(r.name)}</span><span>${(r.share*100).toFixed(1)}%</span></div>
+    <div class="bar"><i style="width:${Math.min(100,r.share*100)}%"></i></div>
+    <div class="kv">
+      <span>Shipping share (${r.q} units)</span><b>${money(r.cost)}</b>
+      <span>Shipping per unit</span><b>${money(r.perUnitShip)}</b>
+      <span>Supplier price per unit</span><b>${money(r.p)}</b>
+      <span class="big">Landed cost per unit</span><b class="big">${money(r.landed)}</b>
+      <span>Selling price for ${num(S.margin)}% margin</span><b>${money(r.sell)}</b>
+    </div></div>`).join("");
+}
+
+$("items").addEventListener("input",e=>{
+  const c=e.target.closest(".card"),f=e.target.dataset.f;if(!c||!f)return;
+  S.items[+c.dataset.i][f]=f==="name"?e.target.value:num(e.target.value);
+  save();draw();
+});
+$("items").addEventListener("click",e=>{
+  const d=e.target.dataset.del;if(d===undefined)return;
+  S.items.splice(+d,1);save();drawItems();draw();
+});
+$("add").onclick=()=>{S.items.push({name:"",qty:1,price:0,weight:0});save();drawItems();draw();
+  const n=$("items").querySelectorAll("input[data-f=name]");n[n.length-1].focus()};
+[["ship","ship"],["other","other"],["margin","margin"],["blend","blend"]].forEach(([id,k])=>
+  $(id).addEventListener("input",()=>{S[k]=num($(id).value);$("blendVal").textContent=S.blend;save();draw()}));
+$("method").addEventListener("change",()=>{S.method=$("method").value;$("blendBox").hidden=S.method!=="blend";save();draw()});
+$("clear").onclick=()=>{S.items=[];S.ship=0;S.other=0;save();sync();drawItems();draw()};
+$("copy").onclick=async()=>{
+  const {rows}=calc();
+  const t="Product\tQty\tSupplier price\tShipping/unit\tLanded/unit\tSelling price\n"+
+    rows.map(r=>[r.name,r.q,r.p.toFixed(2),r.perUnitShip.toFixed(2),r.landed.toFixed(2),r.sell.toFixed(2)].join("\t")).join("\n");
+  try{await navigator.clipboard.writeText(t);$("msg").textContent="Copied. Paste it into a spreadsheet."}
+  catch(e){$("msg").textContent="Copy is blocked here. Use your browser's share or open the link in a full browser tab."}
+};
+function sync(){
+  $("ship").value=S.ship;$("other").value=S.other;$("method").value=S.method;
+  $("blend").value=S.blend;$("blendVal").textContent=S.blend;$("margin").value=S.margin;
+  $("blendBox").hidden=S.method!=="blend";
+}
+sync();drawItems();draw();
+</script>
+</body>
+</html>
